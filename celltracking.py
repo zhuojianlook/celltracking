@@ -240,53 +240,50 @@ def reconstruct_graph(df):
 
 def plot_graphs(cpd_data, dt_data):
     plt.figure(figsize=(12, 10))
+    
+    # Determine the maximum number of passages across all cell lines
+    max_passages = max(len(values) for values in cpd_data.values())
+    
+    # Plot cPD Bar Graph
     plt.subplot(2, 1, 1)
-    for cell_line, values in cpd_data.items():
+    bar_width = 0.2  # Width of the bars
+    x = np.arange(max_passages)
+    
+    for i, (cell_line, values) in enumerate(cpd_data.items()):
         valid_values = [value for value in values if isinstance(value, (int, float)) and not np.isnan(value)]
-        if len(valid_values) > 0:
-            x = np.arange(len(valid_values))
-            if len(valid_values) > 3:
-                x_new = np.linspace(x.min(), x.max(), 300)
-                spl = make_interp_spline(x, valid_values, k=3)
-                y_smooth = spl(x_new)
-                plt.plot(x_new, y_smooth, label=f'{cell_line}')
-            else:
-                plt.plot(x, valid_values, label=f'{cell_line}', linestyle='--')
-            plt.scatter(x, valid_values, marker='o')
+        valid_values += [0] * (max_passages - len(valid_values))  # Pad with zeros to match max_passages
+        plt.bar(x + i * bar_width, valid_values, bar_width, label=f'{cell_line}')
+    
     ax1 = plt.gca()
-    ax1.xaxis.set_major_locator(MaxNLocator(integer=True))
+    ax1.set_xticks(x + bar_width * (len(cpd_data) - 1) / 2)
+    ax1.set_xticklabels([f'P{p+1}' for p in range(max_passages)])
     plt.title('Cumulative Population Doublings (cPD) vs. Passage Number')
     plt.xlabel('Passage Number')
     plt.ylabel('cPD')
     plt.legend()
     plt.grid(True)
+    
+    # Plot DT Bar Graph
     plt.subplot(2, 1, 2)
-    for cell_line, values in dt_data.items():
+    for i, (cell_line, values) in enumerate(dt_data.items()):
         valid_values = [value for value in values if isinstance(value, (int, float)) and not np.isnan(value)]
-        if len(valid_values) > 0:
-            x = np.arange(len(valid_values))
-            if len(valid_values) > 3:
-                try:
-                    x_new = np.linspace(x.min(), x.max(), 300)
-                    spl = make_interp_spline(x, valid_values, k=3)
-                    y_smooth = spl(x_new)
-                    plt.plot(x_new, y_smooth, label=f'{cell_line}')
-                except Exception as e:
-                    print(f"Interpolation error for {cell_line}: {e}")
-                    plt.plot(x, valid_values, label=f'{cell_line}', linestyle='--')
-            else:
-                plt.plot(x, valid_values, label=f'{cell_line}', linestyle='--')
-            plt.scatter(x, valid_values, marker='o')
+        valid_values += [0] * (max_passages - len(valid_values))  # Pad with zeros to match max_passages
+        plt.bar(x + i * bar_width, valid_values, bar_width, label=f'{cell_line}')
+    
     ax2 = plt.gca()
-    ax2.xaxis.set_major_locator(MaxNLocator(integer=True))
+    ax2.set_xticks(x + bar_width * (len(dt_data) - 1) / 2)
+    ax2.set_xticklabels([f'P{p+1}' for p in range(max_passages)])
     plt.title('Doubling Time (DT) vs. Passage Number')
     plt.xlabel('Passage Number')
     plt.ylabel('DT (hours/PD)')
     plt.legend()
     plt.grid(True)
+    
     plt.tight_layout()
     plt.show()
     st.pyplot(plt.gcf())
+
+
 
 def update_media_change(node, media_change_datetime, sheet_url, gc):
     df = load_data(sheet_url, gc)  # Load existing data
@@ -541,7 +538,7 @@ def main():
 
         df = load_data(sheet_url, gc)
         node_options = df['Node'].dropna().unique().tolist()
-        selected_node = st.selectbox('Select a Node to Change Media:', [''] + node_options)
+        selected_node = st.selectbox('Select a Node to Change Media: (PLEASE RELOAD ENTIRE PAGE --> LOAD DATA FROM SHEET BEFORE PROCEEDING)', [''] + node_options)
         if selected_node:
             media_change_date = st.date_input("Select Date for Media Change:", value=datetime.now())
             media_change_time = st.time_input("Select Time for Media Change:", value=datetime.now().time())
@@ -572,7 +569,7 @@ def main():
 
     existing_nodes = [node for node in st.session_state['graph']]
     base_node_selection = st.selectbox('Select an existing vessel', [""] + existing_nodes, index=0, key="base_node_selection")
-    new_base_node = st.text_input('Or enter a new lineage name', value=default_base_node, key="new_base_node")
+    new_base_node = st.text_input('Or enter a new lineage name (must include letters)', value=default_base_node, key="new_base_node")
     media_change_interval = st.number_input('Set Media Change Interval (hours)', min_value=0, value=84, step=1, format="%d", key='media_change_interval')
 
     if st.button('Add Entry', key='add_entry'):
