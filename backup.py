@@ -11,10 +11,8 @@ import numpy as np
 from scipy.interpolate import make_interp_spline
 from matplotlib.ticker import MaxNLocator
 import matplotlib.colors as mcolors
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-import streamlit.components.v1 as components
-import pytz
+
+st.set_page_config(layout="wide")
 
 # Helper functions used in the main function
 if 'graph' not in st.session_state:
@@ -22,37 +20,11 @@ if 'graph' not in st.session_state:
 if 'depth_counters' not in st.session_state:
     st.session_state['depth_counters'] = defaultdict(lambda: defaultdict(int))
 
-def authenticate_google_calendar(json_key):
-    credentials = service_account.Credentials.from_service_account_info(
-        json_key,
-        scopes=['https://www.googleapis.com/auth/calendar']
-    )
-    service = build('calendar', 'v3', credentials=credentials)
-    return service
-
-def create_calendar_event(service, calendar_id, summary, start_time, end_time, time_zone='UTC'):
-    event = {
-        'summary': summary,
-        'start': {
-            'dateTime': start_time,
-            'timeZone': time_zone,
-        },
-        'end': {
-            'dateTime': end_time,
-            'timeZone': time_zone,
-        }
-    }
-    event = service.events().insert(calendarId=calendar_id, body=event).execute()
-    print('Event created: %s' % (event.get('htmlLink')))
-
-
-
 def authenticate_gspread(json_key):
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     credentials = ServiceAccountCredentials.from_json_keyfile_dict(json_key, scope)
     gc = gspread.authorize(credentials)
     return gc
-
 
 def calculate_pd(cells_start, cells_end):
     if cells_start > 0 and cells_end > 0:
@@ -311,7 +283,9 @@ def plot_graphs(cpd_data, dt_data):
     plt.show()
     st.pyplot(plt.gcf())
 
-def update_media_change(node, media_change_datetime, sheet_url, gc, calendar_service, calendar_id):
+
+
+def update_media_change(node, media_change_datetime, sheet_url, gc):
     df = load_data(sheet_url, gc)  # Load existing data
     mask = df['Node'] == node
 
@@ -342,34 +316,8 @@ def update_media_change(node, media_change_datetime, sheet_url, gc, calendar_ser
         st.session_state['graph'].nodes[node]['Color'] = '#FF007F'
         st.session_state['graph'].nodes[node]['Media Change Count'] = new_count.iloc[0]  # Convert to scalar
 
-    # Extract vessel type for the task title
-    vessel_type = df.loc[mask, 'Vessel Type'].values[0]
-    event_summary = f"{node} ({vessel_type}) media change"
-
-    # Fetch the Media Change Interval for the node
-    media_change_interval = df.loc[mask, 'Media Change Interval'].values[0]
-    if pd.isnull(media_change_interval):
-        media_change_interval = 84  # Default to 84 hours if not specified
-
-    media_change_interval = int(media_change_interval)  # Convert to standard Python integer
-
-    # Calculate start and end times for the calendar event
-    user_timezone = st.session_state['user_timezone']
-    local_media_change_datetime = media_change_datetime.astimezone(pytz.timezone(user_timezone))
-
-    event_start_time = (local_media_change_datetime + timedelta(hours=media_change_interval)).isoformat()
-    event_end_time = (local_media_change_datetime + timedelta(hours=media_change_interval + 1)).isoformat()  # Assuming 1 hour event duration
-
-    if calendar_service and calendar_id:
-        print(f"Creating calendar event: {event_summary} starting at {event_start_time} in timezone {user_timezone}")
-        create_calendar_event(calendar_service, calendar_id, event_summary, event_start_time, event_end_time)
-        st.success(f"Media change for {node} updated successfully. Color set to red-pink, and media change count is now {new_count.iloc[0]}. Calendar event created.")
-    else:
-        st.success(f"Media change for {node} updated successfully. Color set to red-pink, and media change count is now {new_count.iloc[0]}. No calendar event created.")
+    st.success(f"Media change for {node} updated successfully. Color set to red-pink, and media change count is now {new_count.iloc[0]}.")
     return df
-
-
-
 def save_data_to_sheet(sheet_url, gc):
     worksheet = gc.open_by_url(sheet_url).sheet1
     headers = ['Node', 'Parent', 'Date', 'Vessel Type', 'Cells Start', 'Cells End', 'Notes', 'Media Change Interval', 'Media Change', 'Color', 'Media Change Count']
@@ -466,16 +414,6 @@ def calculate_node_color(last_change_datetime, media_change_interval):
 
 def main():
     st.title('Cell Culture Tracking Program')
-    
-    # List of all timezones
-    timezones = pytz.all_timezones
-
-    # Add a dropdown menu for timezone selection
-    selected_timezone = st.selectbox('Select your timezone:', options=timezones, index=timezones.index('Asia/Singapore'))  # Default to GMT+8 (Asia/Singapore)
-
-    st.session_state['user_timezone'] = selected_timezone
-
-
     if 'should_draw_graph' not in st.session_state:
         st.session_state['should_draw_graph'] = False
     default_base_node = ''
@@ -485,136 +423,109 @@ def main():
         default_base_node = st.session_state.get('new_base_node', '')
 
     st.sidebar.title("Instructions")
-    st.sidebar.markdown (r"""
-### How to Use This Application
-To use this application effectively, follow these steps:
-1. Upload your Google service account JSON key.
-2. Enter the URL of your Google Sheet shared with the service account.
-3. Enter the Google Calendar ID (if calendar reminders are desired).                        
-4. Use the controls to add culture steps and define passage parameters.
-5. Click 'Add Entry' to create and visualize the cell culture provenance tree.
-6. Click 'Save Data to Sheet' to save changes made to Google Sheets.
-7. Click 'Load Data from Sheet' to load and reconstruct the provenance tree from Google Sheets.
-8. Click 'Refresh' to clear fields e.g. inbetween sequential additions of new cell lineages.
-9. Click Change Media to indicate a change of media (automatic data write to Google Sheets)
-10. Select the cell lines of interest, then click 'Calculate PD, DT, and Generate Graphs' to plot cPD and DT charts. Select the order of flasks in the passage train. 
-                         
-### Best Practices for Cell Culture Calculations
-                         
-#### Practical Tips for Cell Culture
-- Maintain the recommended minimum seeding density for each cell line.
-- Standardize seeding density for experiments.
-- Harvest cells based on fixed time points or confluence levels (e.g., 80-90% confluence).
-- Document all relevant parameters:
-  - Days in culture.
-  - Seeding and harvest cell count numbers (for PD and DT calculations).
-  - Maintain consistent flask types/numbers and media volumes.                         
+    st.sidebar.markdown(r"""                 
+        ### How to Use This Application
+        To effectively use this application, follow these steps:
+        1. Upload your Google service account JSON key.
+        2. Enter the URL of your Google Sheet that is shared with the service account.
+        3. Use the controls to add culture steps and define passage parameters.
+        4. Click 'Add to Graph' to create and visualize the graph.
+        5. Use 'Save Data to Sheet' to save your graph data to Google Sheets.
+        6. Use 'Load Data from Sheet' to load and reconstruct the graph from Google Sheets.
+        7. Press 'Refresh' if you need to refresh the session state, e.g., after adding a cell line.
 
-#### Parameters to Keep Constant
-1. **First Use Case:** 
-   - Use identical flasks across cell lines.
-   - Seed flasks at a fixed cell density.
-   - Passage after a fixed amount of time.
-   - Keep the volume of media and number of hours between media changes constant.
-   - This method allows comparison of cPD across cell lines.
+        ### Best Practices for Cell Culture Calculations and Methodologies
+        #### Understanding Population Doubling (PD) and Cumulative Population Doubling (cPD)
+        - **Population Doubling (PD)** is used as a better measure of cellular age in culture versus passage number.
+        - **Cumulative Population Doubling (cPD)** represents the total number of times the cell population has doubled since the onset of the culture. Cells from different cell lines with the same cumulative population doubling can be considered to be the same biological age.
+        - **Parameters to keep constant:**
+            *** First Use Case *** In order for the calculations to work well: Type and size of flasks used should be identical across cell lines, flasks should be seeded at a fixed cell density and should be passaged after a fixed amount of time for accurate generation of cumulative population doubling data. e.g. Every 7days. Volume of media used e.g. 0.1mL/cm2 should be kept constant. Number of hours between media changes should be kept constant. 
+            In this scenario, a slower growing cell line will have a lower cPD than a faster growing cell line. It is also possible to identify the fastest or slowest growing passage stage within each cell line by looking at the gradient between the previous passage and the current passage number in the generated graph. 
+            It is expected that as the passage number increases, the gradient becomes more horizontal as the effect of senecence comes into play, the shape of the graph will therefore be sigmoidal in shape. For experimental purposes, if the cPD of cell lines are similar, they can be understood to be of the same biological age (not taking into account the selection stress that passage creates and therefore a possible limitation of comparing different cell lines of same cPD but different passage level. Note that this culture strategy may be more relavent for homogenous cell cultures such as where the effect of passage has a known minimal effect on the heterogenity of the cellular population, however a determination of growth potential between different cell lines or donors is required.
+            *** Second Use Case *** Alernatively, for primary cultures of a heterogenous tissue source, instead of a fixed amount of time in passage, it is also possible to fix an endpoint for each passage e.g. 70% confluency. In this scenario, the cPD vs Passage Number graph gradient would be best maintained as constant slope for all cell lines, with deviations attributing to operator error in determining cell density before passage. It is also best practice to match the passage with an integral multiple the population doubling (easiest case 2X). E.g. Passage when population has doubled, tripled or quadrupled.  Therefore experience with correlating confluency via light microscopy and expected number of cells is required from the operator. 
+            With this strategy, multiple cell lines from heterogenous sources are more comparable as the selective pressure of passage is kept constant. The primary limitation is that cell lines with differing senescence are likely to reach the same passage point at differing times. 
+            With this strategy, passage level and cPD are equivalent measures of cellular biological age. Therefore, a separate graph for growth rate (doubling time vs passage number) is also automatically generated. Passage levels with faster expansion rates would have a lower doubling time. For primary cultures, it is expected that as the passage levels increase the doubling time likewise increases or follows a normal distribution with left skew e.g. peaking at P2. For experimental purposes, because the PDs are fixed per passage, differing population doubling times at a chosen passage level can be used to infer proliferative rates that can be correlated to characteristics in source material such as donor age. 
+        - **Caveats:** This program is not of sufficent granularity to measure generation time, which is the interval from one point in the cell division cycle to the same point in the cycle on division later. This should not be confused with the population doubling time, which is derived from the total cell count of a population and therefore averages different generation times and is influenced by nongrowing and dying cells. 
+        - **Media Change:** Due to the challenges of keeping track of media changes, this program allows the user to set a minimum number of hours required for media changes for each passage. The color of the flask will then change depending on the number of hours to the next media change (Pink to Yellow) for a visual representation. Media change may be necessary due to stability of specific components within the media, depletion and should be kept constant. Ultimately this entire process should be machine automated but engineering costs and complexity are a major factor in most laboratories.
+        #### Calculating Population Doubling (PD)
+        To calculate the population doubling during a specific passage:
+        1. **Formula**:
+        $$
+        PD = \frac{\log\left(\frac{\text{Number of cells at harvest}}{\text{Number of cells seeded}}\right)}{\log(2)}
+        $$
 
-2. **Second Use Case:**
-   - For primary cultures of heterogeneous tissue sources, fix an endpoint for each passage (e.g., 70% confluency).
-   - Maintain a constant slope for the cPD vs. Passage Number graph.
-   - Passage when the population has doubled, tripled, or quadrupled.
+        - Convert the ratio of harvested cells to seeded cells into a logarithmic scale using log base 10, and then divide by log(2) to convert it into base 2.
+        - This calculation gives the number of times the cell population has doubled during the passage.
 
-                         
-#### Population Doubling (PD) and Cumulative Population Doubling (cPD)
-- **Population Doubling (PD):** A measure of cellular age in culture versus passage number.
-- **Cumulative Population Doubling (cPD):** Represents the total number of cell population doublings since the culture began. Cells with the same cPD are biologically the same age.
+        #### Calculating Doubling Time (DT)
+        Doubling time reflects how quickly cells double in number during a culture period.
+        1. **Formula**:
+        $$
+        DT = \frac{\text{Time in culture}}{PD}
+        $$
 
+        - Divide the total culture duration by the population doubling to find how often the cells doubled during that time.
 
-#### Calculating Population Doubling (PD)
-To calculate PD during a specific passage:
-- **Formula:**
-$$
-PD = \frac{\log\left(\frac{\text{Number of cells at harvest}}{\text{Number of cells seeded}}\right)}{\log(2)}
-$$
+        #### Tracking Cumulative Population Doubling (cPD)
+        - To obtain the cumulative population doubling, add the PD of each passage sequentially.
+        - Example progression:
+        - Passage 1 (P1): PD = 3.5
+        - Passage 2 (P2): PD = 3.0 (Cumulative PD = 6.5)
+        - Passage 3 (P3): PD = 2.5 (Cumulative PD = 9.0)
+        - This series provides a running total of cell doublings, useful for assessing cell line vitality and comparability across different lines.
 
-#### Calculating Doubling Time (DT)
-Doubling time reflects how quickly cells double in number during a culture period.
-- **Formula:**
-$$
-DT = \frac{\text{Time in culture}}{PD}
-$$
+        #### Plotting Growth Curves
+        - Plot cPD against the passage number to visualize the growth or expansion curve of the cell line.
+        - This curve helps compare the growth rates and senescence stages across different cell lines.
 
-#### Tracking Cumulative Population Doubling (cPD)
-To obtain cPD, add the PD of each passage sequentially:
-- Example progression:
-  - P1: PD = 3.5
-  - P2: PD = 3.0 (Cumulative PD = 6.5)
-  - P3: PD = 2.5 (Cumulative PD = 9.0)
+        #### Practical Tips for Cell Culture
+        - Always maintain the recommended minimum seeding density specific to each cell line.
+        - While not strictly required for calculations, standardize seeding density for experiments to ensure reproducibility
+        - Harvest cells based on fixed time points or confluence levels (e.g., 80-90% confluence).
+        - Document all relevant parameters:
+        - Days in culture.
+        - Seeding and harvest cell count numbers (for PD and DT calculations).
+        - Maintain a consistent type/number of flasks and media volumes used (important for scaling and reproducibility). e.g. 0.1 ml of media per cm²              
 
-#### Plotting Growth Curves
-- Plot cPD against passage number to visualize the growth or expansion curve of the cell line.
-- This curve helps compare growth rates and senescence stages across different cell lines.
-
-#### Media Change
-- The program allows setting a minimum number of hours required for media changes for each passage.
-- The color of the flask changes depending on the hours to the next media change (Pink to Yellow).
-                         
-### Setting Up Prerequisites
-To set up the prerequisites for using this application, follow these steps:
-
-1. **Create a Google Service Account JSON Key:**
-   - **Step 1:** Create a [Google Cloud Project](https://console.cloud.google.com/welcome?project=cell-culture-tracking).
-     - Sign in with your Google account.
-     - Click on the project dropdown and select "New Project".
-     - Enter a project name and click "Create".
-   - **Step 2:** Enable the Google Sheets API.
-     - Select the new project.
-     - Navigate to "APIs & Services > Dashboard".
-     - Click on "+ ENABLE APIS AND SERVICES".
-     - Search for "Google Sheets API" and click "Enable".
-   - **Step 3:** Enable the Google Calendar API.
-     - Navigate to "APIs & Services > Dashboard".
-     - Click on "+ ENABLE APIS AND SERVICES".
-     - Search for "Google Calendar API" and click "Enable".
-   - **Step 4:** Create a Service Account.
-     - Go to "IAM & Admin > Service accounts".
-     - Click "Create Service Account".
-     - Enter a name and description, then click "Create and Continue".
-     - Skip granting access, and click "Done".
-   - **Step 5:** Create the JSON Key.
-     - Select the service account you created.
-     - Go to the "Keys" tab.
-     - Click "Add Key" and choose "JSON".
-     - A JSON file containing the private key will be downloaded. Keep it safe.
-
-2. **Create and Share a Google Sheet:**
-   - Create a new Google Sheet with your Google account.
-   - Share the Google Sheet with the service account email (found in the JSON file, ending in `@example.iam.gserviceaccount.com`) with 'write' permissions.
-
-3. **Finding the Calendar ID:**
-   - Open Google Calendar.
-   - Under "My calendars", click on the three dots next to the calendar you want to use and select "Settings and sharing".
-   - Scroll down to the "Integrate calendar" section.
-   - Copy the "Calendar ID" (it looks like `**********@group.calendar.google.com`).
-
-Note: When retroactively modifying dates in Google Sheets, follow the same format used by the application to prevent data overwrite. Beginning with a completely blank Google Sheet is recommended. Always save your data redundantly.
-
-Approximate video guide: [YouTube](https://www.youtube.com/watch?v=fxGeppjO0Mg)
-""")
-
+        ### Setting Up Prerequisites
+        To set up prerequisites for using this application, follow these steps:
+        Approximate video guide: (https://www.youtube.com/watch?v=fxGeppjO0Mg)
+        1. **Create a Google service account JSON Key**:
+            - **Step 1**: Create a [Google Cloud Project](https://console.cloud.google.com/welcome?project=cell-culture-tracking).
+            - Go to the Google Cloud Console.
+            - Sign in with your Google account if you haven't already done so.
+            - Click on the project dropdown at the top of the page and then click on "New Project".
+            - Enter a project name and select a billing account if necessary.
+            - Click on "Create".
+            - **Step 2**: Enable Google Sheets API.
+            - Make sure the new project is selected.
+            - Navigate to "APIs & Services > Dashboard".
+            - Click on "+ ENABLE APIS AND SERVICES".
+            - Search for "Google Sheets API" and click on it.
+            - Click on "Enable".
+            - **Step 3**: Create a Service Account.
+            - Go to "IAM & Admin > Service accounts".
+            - Click on "Create Service Account".
+            - Enter a name and description for the service account.
+            - Click on "Create and Continue".
+            - You can skip granting this service account access to the project and click "Continue".
+            - Click "Done" to finish creating the service account.
+            - **Step 4**: Create the JSON Key.
+            - Find the service account you just created in the list and click on it.
+            - Go to the "Keys" tab.
+            - Click on "Add Key" and choose "JSON" from the dropdown menu.
+            - Your browser will download a JSON file containing the private key. Keep it safe.
+        2. Create a Google sheet with your normal Google account and share the Google sheet with the service account email with 'write' privileges. The service account email can be found in the JSON file and should look like 'example@example.iam.gserviceaccount.com'.
+        3. Note that if you want to retroactively modify the date in google sheets, you have to follow the same format, otherwise saving to sheet will overwrite a blank value. Note that starting from a completely blank google sheet is the intended start use case. Please save your data redundantly
+        """)
 
     # Connection and sheet handling
     uploaded_file = st.file_uploader("Upload Google service account JSON key", type="json")
     sheet_url = st.text_input("Enter the URL of your Google Sheet")
-    calendar_id = st.text_input("Enter your Google Calendar ID (Optional)")
-
     gc = None
-    calendar_service = None
-
     if uploaded_file and sheet_url:
         json_key = json.load(uploaded_file)
         gc = authenticate_gspread(json_key)
-        if calendar_id:
-            calendar_service = authenticate_google_calendar(json_key)
         if gc:
             st.success("Connected to Google Sheets successfully!")
 
@@ -627,13 +538,13 @@ Approximate video guide: [YouTube](https://www.youtube.com/watch?v=fxGeppjO0Mg)
 
         df = load_data(sheet_url, gc)
         node_options = df['Node'].dropna().unique().tolist()
-        selected_node = st.selectbox('Select a Node to Change Media: (RELOAD ENTIRE PAGE AND API KEYS FIRST)', [''] + node_options)
+        selected_node = st.selectbox('Select a Node to Change Media: (PLEASE RELOAD ENTIRE PAGE --> LOAD DATA FROM SHEET BEFORE PROCEEDING)', [''] + node_options)
         if selected_node:
             media_change_date = st.date_input("Select Date for Media Change:", value=datetime.now())
             media_change_time = st.time_input("Select Time for Media Change:", value=datetime.now().time())
             media_change_datetime = datetime.combine(media_change_date, media_change_time)
             if st.button('Change Media', key='change_media'):
-                updated_df = update_media_change(selected_node, media_change_datetime, sheet_url, gc, calendar_service, calendar_id)
+                updated_df = update_media_change(selected_node, media_change_datetime, sheet_url, gc)
                 if updated_df is not None:
                     st.session_state['latest_data'] = updated_df
                     st.session_state['should_draw_graph'] = True  # Set flag to draw graph
@@ -641,8 +552,6 @@ Approximate video guide: [YouTube](https://www.youtube.com/watch?v=fxGeppjO0Mg)
         if st.button('Save Data to Sheet', key='save_data_to_sheet'):
             save_data_to_sheet(sheet_url, gc)
             st.session_state['should_draw_graph'] = True  # Set flag to draw graph
-
-
 
     num_children = st.number_input('Enter Number of Child Vessels', min_value=0, step=1, format="%d")
     vessel_options = ['T75', 'T25', 'T125', '12 well plate', '6 well plate', 'Cryovial']
