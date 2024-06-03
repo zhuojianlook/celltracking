@@ -592,6 +592,7 @@ To set up the prerequisites for using this application, follow these steps:
 
 3. **Finding the Calendar ID:**
    - Open Google Calendar.
+   - Create or select an existing calendar, share this calendar with the service account email.
    - Under "My calendars", click on the three dots next to the calendar you want to use and select "Settings and sharing".
    - Scroll down to the "Integrate calendar" section.
    - Copy the "Calendar ID" (it looks like `**********@group.calendar.google.com`).
