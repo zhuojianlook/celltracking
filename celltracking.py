@@ -45,14 +45,11 @@ def create_calendar_event(service, calendar_id, summary, start_time, end_time, t
     event = service.events().insert(calendarId=calendar_id, body=event).execute()
     print('Event created: %s' % (event.get('htmlLink')))
 
-
-
 def authenticate_gspread(json_key):
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     credentials = ServiceAccountCredentials.from_json_keyfile_dict(json_key, scope)
     gc = gspread.authorize(credentials)
     return gc
-
 
 def calculate_pd(cells_start, cells_end):
     if cells_start > 0 and cells_end > 0:
@@ -368,8 +365,6 @@ def update_media_change(node, media_change_datetime, sheet_url, gc, calendar_ser
         st.success(f"Media change for {node} updated successfully. Color set to red-pink, and media change count is now {new_count.iloc[0]}. No calendar event created.")
     return df
 
-
-
 def save_data_to_sheet(sheet_url, gc):
     worksheet = gc.open_by_url(sheet_url).sheet1
     headers = ['Node', 'Parent', 'Date', 'Vessel Type', 'Cells Start', 'Cells End', 'Notes', 'Media Change Interval', 'Media Change', 'Color', 'Media Change Count']
@@ -446,8 +441,6 @@ def save_data_to_sheet(sheet_url, gc):
     except Exception as e:
         st.error(f"Failed to save data: {e}")
 
-
-
 def calculate_node_color(last_change_datetime, media_change_interval):
     if last_change_datetime is None or pd.isnull(last_change_datetime):
         return '#d3d3d3'  # Default to grey if no media change data
@@ -474,7 +467,6 @@ def main():
     selected_timezone = st.selectbox('Select your timezone:', options=timezones, index=timezones.index('Asia/Singapore'))  # Default to GMT+8 (Asia/Singapore)
 
     st.session_state['user_timezone'] = selected_timezone
-
 
     if 'should_draw_graph' not in st.session_state:
         st.session_state['should_draw_graph'] = False
@@ -602,7 +594,6 @@ Note: When retroactively modifying dates in Google Sheets, follow the same forma
 Approximate video guide: [YouTube](https://www.youtube.com/watch?v=fxGeppjO0Mg)
 """)
 
-
     # Connection and sheet handling
     uploaded_file = st.file_uploader("Upload Google service account JSON key", type="json")
     sheet_url = st.text_input("Enter the URL of your Google Sheet")
@@ -629,12 +620,17 @@ Approximate video guide: [YouTube](https://www.youtube.com/watch?v=fxGeppjO0Mg)
         df = load_data(sheet_url, gc)
         node_options = df['Node'].dropna().unique().tolist()
         selected_node = st.selectbox('Select a Node to Change Media: (RELOAD ENTIRE PAGE AND API KEYS FIRST)', [''] + node_options)
+
         if selected_node:
-            media_change_date = st.date_input("Select Date for Media Change:", value=datetime.now())
-            media_change_time = st.time_input("Select Time for Media Change:", value=datetime.now().time())
-            media_change_datetime = datetime.combine(media_change_date, media_change_time)
+            if 'media_change_datetime' not in st.session_state:
+                st.session_state['media_change_datetime'] = datetime.now()
+                
+            media_change_date = st.date_input("Select Date for Media Change:", value=st.session_state['media_change_datetime'].date())
+            media_change_time = st.time_input("Select Time for Media Change:", value=st.session_state['media_change_datetime'].time())
+            st.session_state['media_change_datetime'] = datetime.combine(media_change_date, media_change_time)
+            
             if st.button('Change Media', key='change_media'):
-                updated_df = update_media_change(selected_node, media_change_datetime, sheet_url, gc, calendar_service, calendar_id)
+                updated_df = update_media_change(selected_node, st.session_state['media_change_datetime'], sheet_url, gc, calendar_service, calendar_id)
                 if updated_df is not None:
                     st.session_state['latest_data'] = updated_df
                     st.session_state['should_draw_graph'] = True  # Set flag to draw graph
@@ -643,8 +639,6 @@ Approximate video guide: [YouTube](https://www.youtube.com/watch?v=fxGeppjO0Mg)
             save_data_to_sheet(sheet_url, gc)
             st.session_state['should_draw_graph'] = True  # Set flag to draw graph
 
-
-
     num_children = st.number_input('Enter Number of Child Vessels', min_value=0, step=1, format="%d")
     vessel_options = ['T75', 'T25', 'T125', '12 well plate', '6 well plate', 'Cryovial']
     vessel_selections = [st.selectbox(f'Vessel type for child {i+1}:', vessel_options, key=f'vessel_{i}') for i in range(num_children)]
@@ -652,10 +646,11 @@ Approximate video guide: [YouTube](https://www.youtube.com/watch?v=fxGeppjO0Mg)
     notes = [st.text_input(f'Notes for child {i+1}:', key=f'notes_{i}') for i in range(num_children)]
     num_cells_end_parent = st.number_input('Total end cell number for Parent vessel', min_value=0, format="%d", key='cells_end_parent')
     creation_date = st.date_input('Select Date of Passage', value=datetime.today())
+
     # Time selection with session state management
     if 'time_of_passage' not in st.session_state:
         st.session_state['time_of_passage'] = datetime.now().time()
-    creation_time = st.time_input('Select Time of Passage', value=st.session_state['time_of_passage'])
+    creation_time = st.time_input('Select Time of Passage:', value=st.session_state['time_of_passage'])
     st.session_state['time_of_passage'] = creation_time
     full_creation_datetime = datetime.combine(creation_date, creation_time)
 
@@ -667,7 +662,7 @@ Approximate video guide: [YouTube](https://www.youtube.com/watch?v=fxGeppjO0Mg)
     if st.button('Add Entry', key='add_entry'):
         base_node = new_base_node if new_base_node else base_node_selection
         if base_node:
-            add_nodes(base_node, num_children, full_creation_datetime, vessel_selections, num_cells_start, num_cells_end_parent, notes, media_change_interval) 
+            add_nodes(base_node, num_children, full_creation_datetime, vessel_selections, num_cells_start, num_cells_end_parent, notes, media_change_interval)
             st.session_state['should_draw_graph'] = True
 
     if st.button('Refresh', key='refresh'):
